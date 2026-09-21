@@ -12,6 +12,8 @@ import { registerAnimConfigMod } from './ui/mods/animConfig'
 import { registerVanillaAnimationExporter } from './exporters/animationExporter'
 import { registerModelFormatMod } from './bbmods/modelFormatMod'
 import { registerFaceTintMod } from './bbmods/faceTint'
+import { registerTextureVariantMod } from './ui/mods/textureVariant'
+import { registerBoneEffectsMod } from './ui/mods/boneEffects'
 // import './util/minecraft/items'
 // import './util/minecraft/entities'
 import { intl } from './util/intl'
@@ -22,6 +24,8 @@ registerBoneConfigMod()
 registerAnimConfigMod()
 registerModelFormatMod()
 registerFaceTintMod()
+registerTextureVariantMod()
+registerBoneEffectsMod()
 
 const errorMessages = [
 	'Uh oh!',

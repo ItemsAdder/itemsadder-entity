@@ -6,10 +6,11 @@ import { settings } from '../settings'
 import {getProjectFolder, isInternalModel} from '../util/utilz'
 import { validateItemsAdderContentsFolder } from './itemsadderYaml'
 import { createAnimationFile } from './animationFileBuilder'
+import { createV2AnimationFile } from './v2AnimationExporter'
 import { writeAnimationFile } from './animationFileWriter'
 import { syncAnimationExportYaml } from './animationYamlSync'
 
-async function exportAnimationFile(generated: { animationFile: string; }) {
+async function exportAnimationFile(generated: { animationFile: string | Buffer; }) {
 	console.log("settings", settings)
 	writeAnimationFile(generated, settings)
 }
@@ -29,7 +30,9 @@ async function animationExport(data: any) {
 		return
 	}
 
-	const generated = await createAnimationFile(
+	const generated = settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)
+		? createV2AnimationFile(data)
+		: await createAnimationFile(
 		data.animations, // Animations (each entry is RenderedAnimation)
 		data.bones,
 		data.scaleModels,

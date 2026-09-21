@@ -5,3 +5,10 @@ test_export/
 .idea/
 .DS_Store
 test-fixtures/
+
+# Native V2 editable projects stay tracked; generated exports and raw oracles do not.
+projects/native-v2/validated-content/
+projects/native-v2/*/contents/*/resourcepack/
+projects/native-v2/*/contents/*/custom_entity_*.yml
+projects/native-v2/*/conversion-report.json
+projects/native-v2/*/oracle.json

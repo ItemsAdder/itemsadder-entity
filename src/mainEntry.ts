@@ -21,6 +21,10 @@ import { configurePlayerEmoteEditing, restoreHiddenUI } from './ui/mods/playerEm
 import { registerInternalBoneProtection } from './ui/mods/internalBoneProtection'
 import { registerMainMenu } from './ui/menu/mainMenu'
 import { registerProjectUiHandlers } from './ui/mods/projectUiHandlers'
+import { applyVariantPreview } from './ui/panel/states'
+import { bus } from './util/bus'
+import { createV2GeometryProfiles } from './exporters/v2GeometryProfiles'
+import { beginV2EmbeddedTextures } from './format/v2EmbeddedTextures'
 
 // import { makeArmorStandModel } from './makeArmorStandModel'
 
@@ -74,6 +78,7 @@ async function computeAnimationData(
 	options: any
 ) {
 	console.groupCollapsed('Compute Animation Data')
+	beginV2EmbeddedTextures(settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings))
 
 	if(isInternalModel(settings)) {
 		// Or getModelExportFolder won't work
@@ -115,6 +120,8 @@ async function computeAnimationData(
 	}
 
 	const animations = (await renderAnimation(options)) as aj.Animations
+	applyVariantPreview('default')
+	bus.dispatch('variant_preview_invalidated', {})
 	const cubeData: aj.CubeData = computeElements()
 	const models: aj.ModelObject = await computeModels(cubeData)
 	const variantTextureOverrides = computeVariantTextureOverrides(
@@ -131,9 +138,12 @@ async function computeAnimationData(
 		scaleModels: aj.ScaleModels
 		variantTouchedModels: aj.variantTouchedModels
 	}
+	const geometryProfiles = settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)
+		? createV2GeometryProfiles(models, cubeData, variantTextureOverrides)
+		: undefined
 
 	if(needsToExportJsonsModels(settings)) {
-		await exportRigModels(models, variants.variantModels, scaleModels)
+		await exportRigModels(models, variants.variantModels, scaleModels, geometryProfiles)
 		if (settings.iaentitymodel.transparentTexturePath) {
 			await exportTransparentTexture()
 		}
@@ -148,6 +158,7 @@ async function computeAnimationData(
 		variantTextureOverrides,
 		variantModels: variants.variantModels,
 		variantTouchedModels: variants.variantTouchedModels,
+		geometryProfiles,
 		animations,
 	}
 	console.groupEnd()

@@ -118,6 +118,14 @@ export const DefaultSettings = {
 			 	return isPlayerModel(settings);
 			}
 		},
+		entityFormat: {
+			title: 'Custom entity format',
+			description: 'V2 uses item displays. Existing projects keep the legacy exporter until converted.',
+			type: 'select',
+			default: 'legacy',
+			options: { legacy: 'Legacy (armor stands)', v2: 'V2 (item displays)' },
+			isVisible() { return !isPlayerModel(settings) },
+		},
 		modelScalingMode: {
 			get title() {
 				return tl('iaentitymodel.settings.modelScalingMode.title')
@@ -346,7 +354,7 @@ class Settings {
 		try {
 			let global_data = JSON.parse(
 				localStorage.getItem(process.env.GLOBAL_SETTINGS_KEY)
-			)
+			) || []
 			for (const [namespace, value] of global_data) {
 				for (const key in value) {
 					this.set(`${namespace}.${key}`, value[key])

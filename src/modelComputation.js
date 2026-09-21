@@ -7,6 +7,7 @@ import * as resourcepack from './util/minecraft/resourcepack'
 import { BUILTIN_PLAYER_TEXTURE_UUID } from './constants/internalPlayer'
 import { showInvalidCubeNotification, clearInvalidCubeNotification } from './ui/notifications/invalidCube'
 import { settings } from './settings'
+import { prepareDisplayModel } from './exporters/displayTransforms'
 import './overrides/overrides'
 import { CustomError } from './util/customError'
 import {  safeFunctionName } from './util/replace'
@@ -146,18 +147,21 @@ export function computeElements() {
 		for (var face in s.faces) {
 			if (s.faces.hasOwnProperty(face)) {
 				if (s.faces[face].texture !== null) {
+					const tex = s.faces[face].getTexture?.()
 					var tag = new oneLiner()
 					if (s.faces[face].enabled !== false) {
 						tag.uv = s.faces[face].uv.slice()
 						tag.uv.forEach((n, i) => {
-							tag.uv[i] = (n * 16) / UVEditor.getResolution(i % 2)
+							const textureResolution = i % 2 ? tex?.uv_height : tex?.uv_width
+							const resolution = settings.iaentitymodel.entityFormat === 'v2' && Number.isFinite(textureResolution) && textureResolution > 0
+								? textureResolution : UVEditor.getResolution(i % 2)
+							tag.uv[i] = (n * 16) / resolution
 						})
 					}
 					if (s.faces[face].rotation) {
 						tag.rotation = s.faces[face].rotation
 					}
 					if (s.faces[face].texture) {
-						var tex = s.faces[face].getTexture()
 						if (tex) {
 							tag.texture = '#' + tex.id
 							textures_used.safePush(tex)
@@ -195,6 +199,7 @@ export function computeElements() {
 		}
 		if (!isSceneBased(s)) {
 			if (
+				!(settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)) &&
 				element.rotation &&
 				![-45, -22.5, 0, 22.5, 45].includes(element.rotation.angle)
 			) {
@@ -559,6 +564,10 @@ function computeScaleModifiers() {
 }
 
 async function scaleModels(models) {
+	if (settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)) {
+		Object.values(models).forEach(prepareDisplayModel)
+		return models
+	}
 	computeScaleModifiers()
 	let outOfBoundsJavaList = {};
 	for (const [modelName, model] of Object.entries(models)) {
@@ -657,6 +666,7 @@ function throwIfScaleOutOfBounds(scale, boneName) {
 }
 
 export function computeScaleModels(bones) {
+	if (settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)) return {}
 	computeScaleModifiers()
 	const scaleModels = {}
 

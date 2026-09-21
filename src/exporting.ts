@@ -5,7 +5,10 @@ import { settings } from './settings'
 import transparent from './assets/transparent.png'
 import { getAdvancedPlayerModelExportFolder, getModelExportFolder, isInternalElement, isInternalModel, needsToExportJsonsModels } from './util/utilz'
 import { ensureRigFolderOwnership } from './exporters/rigFolder'
-import { hasExportableElements, writeBaseModel, writeScaleModel, writeVariantModels } from './exporters/modelJsonWriter'
+import { hasExportableElements, writeBaseModel, writeGeometryProfileModels, writeScaleModel, writeVariantModels } from './exporters/modelJsonWriter'
+import type { V2GeometryProfiles } from './exporters/v2GeometryProfiles'
+import * as fs from 'fs'
+import * as path from 'path'
 
 function hasCustomTextures(model: any) {
 	return Object.keys(model?.textures || {}).length > 0
@@ -20,7 +23,8 @@ function shouldSkipBaseModel(name: string, model: any, exportInternalAdditions: 
 async function exportRigModels(
 	models: aj.ModelObject,
 	variantModels: aj.VariantModels,
-	scaleModels: aj.ScaleModels
+	scaleModels: aj.ScaleModels,
+	geometryProfiles?: V2GeometryProfiles
 ) {
 	console.groupCollapsed('Export Rig Models')
 
@@ -29,6 +33,19 @@ async function exportRigModels(
 		? getAdvancedPlayerModelExportFolder(settings)
 		: getModelExportFolder(settings)
 	await ensureRigFolderOwnership(modelExportFolder)
+	if (geometryProfiles) {
+		for (const name of Object.keys(models)) {
+			const file = path.join(modelExportFolder, `${name}.json`)
+			if (fs.existsSync(file)) fs.unlinkSync(file)
+		}
+		for (const [variant, entries] of Object.entries(variantModels)) for (const name of Object.keys(entries)) {
+			const file = path.join(modelExportFolder, variant, `${name}.json`)
+			if (fs.existsSync(file)) fs.unlinkSync(file)
+		}
+		writeGeometryProfileModels(modelExportFolder, geometryProfiles)
+		console.groupEnd()
+		return
+	}
 
 	console.log('Export Models:', models)
 	console.group('Details')

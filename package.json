@@ -15,6 +15,7 @@
 		"lint": "prettier --write .",
 		"format:check": "prettier --check .",
 		"fixtures:check": "node tools/fixtures/check.js",
+		"test:blockbench": "npm run build && node tests/blockbench/run.js",
 		"ci:upload": "node ./tools/distribute.js"
 	},
 	"keywords": [],
@@ -53,6 +54,7 @@
 		"@types/three": "^0.135.0",
 		"blockbench-types": "^4.0.0",
 		"firebase": "^9.6.1",
+		"playwright": "^1.55.0",
 		"js-yaml": "^4.1.0",
 		"prettier": "^2.4.1",
 		"rollup-plugin-typescript2": "^0.31.0",

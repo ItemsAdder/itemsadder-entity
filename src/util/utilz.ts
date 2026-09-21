@@ -60,7 +60,7 @@ function getResourceRootFolder(projectRoot: string, namespace: string, requireEx
 
 export function getModelExportFolder(settings) {
     const projectRoot = getProjectRootFolder()
-    const resourceRoot = getResourceRootFolder(projectRoot, settings.iaentitymodel.namespace)
+    const resourceRoot = getResourceRootFolder(projectRoot, settings.iaentitymodel.namespace, settings.iaentitymodel.entityFormat === 'v2')
     const folderParts = [resourceRoot, "models", "entity", settings.iaentitymodel.projectName]
 
     const modelsPath = normalizePath(path.join(...folderParts))

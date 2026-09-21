@@ -1,7 +1,7 @@
 import { getAdvancedPlayerModelExportFolder, getModelExportFolder, isInternalModel, needsToExportJsonsModels } from '../util/utilz'
 
 export type GeneratedAnimationFile = {
-	animationFile: string
+	animationFile: string | Buffer
 }
 
 export function getAnimationExportExtension(settings: any) {

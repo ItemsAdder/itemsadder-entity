@@ -1,5 +1,7 @@
 import * as path from 'path'
 import { settings } from './settings'
+import { affectedBones, localJointMatrix } from './exporters/v2LocalTransforms'
+import { sampleTextureVariant, textureVariants } from './textureVariant'
 import { Async } from './util/async'
 import { roundToN } from './util/misc'
 import * as hash from './util/hash'
@@ -117,6 +119,8 @@ function getScales() {
 
 function getData(animation, renderedGroups) {
 	Animator.preview(false)
+	const nativeDisplay = settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)
+	const renderedSet = nativeDisplay ? new Set(renderedGroups) : null
 	const pos = getPositions()
 	const rot = getRotations(animation)
 	const scl = getScales()
@@ -126,6 +130,7 @@ function getData(animation, renderedGroups) {
 		const thisRot = rot[group.name]
 		const groupName = safeFunctionName(group.name)
 		res[groupName] = {
+			...(nativeDisplay ? { matrix: localJointMatrix(group, renderedSet) } : {}),
 			pos: {
 				x: -thisPos.x,
 				y: thisPos.y,
@@ -302,6 +307,7 @@ async function renderAnimation(options) {
 				!isSceneBased(group) &&
 				group.visibility &&
 				(
+					(settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings) && group.export) ||
 					group.boneType === "head" || group.boneType === "leftHandPivot" || group.boneType === "rightHandPivot" || group.boneType === "hatPivot" || group.boneType === "mount" || group.boneType === "locator" || group.boneType === "hitbox" ||
 					group.children.find((child) => child instanceof Cube)
 				)
@@ -318,9 +324,11 @@ async function renderAnimation(options) {
 		for (const animation of Animator.animations.sort()) {
 			
 			// Fix animation snapping
-			animation.snapping = 20;
+			// Sampling uses explicit times; never change the user's editor snapping.
 
-			const value = Cache.hit(animation)
+			const nativeDisplay = settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)
+			const textureVariantNames = nativeDisplay ? textureVariants(store.get('states')) : []
+			const value = nativeDisplay ? null : Cache.hit(animation)
 			if (!value) {
 				let maxDistance = -Infinity
 				const frames = []
@@ -330,13 +338,18 @@ async function renderAnimation(options) {
 						? animation.length
 						: animation.length + 0.05
 
-				for (let i = 0; i <= animLength; i += 0.05) {
+				if (!Number.isFinite(animation.length) || animation.length < 0 || animation.length > 3600)
+					throw new Error('Animation length must be finite and at most one hour')
+				const sampleCount = nativeDisplay ? Math.ceil(animation.length * 20) : Math.round(animLength * 20)
+				for (let sample = 0; sample <= sampleCount; sample++) {
+					const i = Math.min(sample / 20, animation.length)
 					accAnimationLength += 0.05
 					await Async.wait_if_overflow()
 					setAnimatorTime(i)
 					const effects = {
 						sounds: [],
-						particles: []
+						particles: [],
+						texture_variant: nativeDisplay ? sampleTextureVariant(animation.animators.effects?.keyframes || [], i, textureVariantNames) : 'default'
 					}
 					if (animation.animators.effects) {
 						const time = Math.round(i * 20) / 20
@@ -391,6 +404,7 @@ async function renderAnimation(options) {
 				avalue = {
 					frames,
 					maxDistance,
+					...(nativeDisplay ? { affectedBones: affectedBones(animation, renderedGroups) } : {}),
 					animType: animation.animType,
 					canPlayerMove: animation.canPlayerMove,
 					name: animation.name,
@@ -398,7 +412,7 @@ async function renderAnimation(options) {
 					length: animation.length
 				}
 				animations[animation.uuid] = avalue
-				Cache.update(animation, avalue)
+				if (!nativeDisplay) Cache.update(animation, avalue)
 			} else {
 				animations[animation.uuid] = value
 			}

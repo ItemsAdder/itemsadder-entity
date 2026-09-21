@@ -6,6 +6,7 @@ import { tl } from '../intl'
 import { normalizePath } from '../misc'
 import { getTexturesExportFolder } from '../utilz'
 import { settings } from '../../settings'
+import { addV2EmbeddedTexture } from '../../format/v2EmbeddedTextures'
 
 function getResourceReferenceByPath(
 	pathStr: string,
@@ -90,6 +91,24 @@ export function getTexturePath(texture: any) {
 
 	if (texture.namespace === 'minecraft') {
 		return getTextureReference(texture)
+	}
+	if (settings.iaentitymodel.entityFormat === 'v2') {
+		let bytes: Buffer | undefined
+		const dataUrl = texture.getDataURL?.()
+		if (texture.path && fs.existsSync(texture.path)) bytes = fs.readFileSync(texture.path)
+		else if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png;base64,')) bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
+		if (!bytes) throw new Error(`Unable to read V2 texture: ${texture.name}`)
+		const meta = texture.frameCount > 1 ? texture.getMCMetaContent?.() : undefined
+		const embedded = addV2EmbeddedTexture(bytes, meta)
+		if (embedded) {
+			const projectTextureFolder = getTexturesExportFolder(settings)
+			const folder = path.resolve(projectTextureFolder, '..', '..', 'ia_v2')
+			fs.mkdirSync(folder, { recursive: true })
+			const file = path.join(folder, `${embedded.digest}.png`)
+			if (!fs.existsSync(file) || !fs.readFileSync(file).equals(bytes)) fs.writeFileSync(file, bytes)
+			if (meta) fs.writeFileSync(`${file}.mcmeta`, JSON.stringify(meta, null, 2))
+			return `${settings.iaentitymodel.namespace}:ia_v2/${embedded.digest}`
+		}
 	}
 
 	let texturesFolder = getTexturesExportFolder(settings)

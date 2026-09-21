@@ -5,6 +5,8 @@ import EVENTS from '../../constants/events'
 import { CustomAction } from '../../util/customAction'
 import { format as modelFormat } from '../../modelFormat'
 import { resetProjectSettings } from '../../settings/projectSettings'
+import { settings } from '../../settings'
+import { isInternalModel } from '../../util/utilz'
 import { show_settings } from '../dialogs/settings'
 import { show_about } from '../dialogs/about'
 // @ts-ignore
@@ -99,6 +101,19 @@ export function registerMainMenu() {
 		}),
 		'iaentitymodel'
 	)
+	MenuBar.addAction(CustomAction('iaentitymodel_convert_v2', {
+		name: 'Convert project to Custom Entities V2',
+		icon: 'upgrade',
+		condition: () => isItemsAdderProjectOpen() && !isInternalModel(settings) && settings.iaentitymodel.entityFormat !== 'v2',
+		click() {
+			settings.update({ iaentitymodel: {
+				entityFormat: 'v2',
+				projectName: settings.iaentitymodel.projectName + '_v2',
+			} })
+			Project.saved = false
+			Blockbench.showQuickMessage('Converted to V2. Export uses a new _v2 model folder; save this project as a copy to keep the original.')
+		},
+	}), 'iaentitymodel')
 	MenuBar.update()
 
 	const onNewProject = () => {

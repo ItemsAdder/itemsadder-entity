@@ -4,6 +4,7 @@ import { bus } from '../util/bus'
 import { safeFunctionName } from '../util/replace'
 import { settings } from '../settings'
 import { getProjectSaveFolder } from '../util/utilz'
+import { normalizeModelEngineDefaultStates } from '../animationSettings'
 
 let registered = false
 
@@ -13,8 +14,9 @@ export function registerModelFormatMod() {
 
 	const oldConvertFunc = ModelFormat.prototype.convertTo
 
-	ModelFormat.prototype.convertTo = function convertTo() {
+ModelFormat.prototype.convertTo = function convertTo() {
 	console.log('Running custom convertTo function')
+	const targetV2 = this.id === modelFormat.id && settings.iaentitymodel.entityFormat === 'v2'
 	Undo.history.empty()
 	Undo.index = 0
 	Project.export_path = ''
@@ -23,7 +25,7 @@ export function registerModelFormatMod() {
 	this.select()
 	Modes.options.edit.select()
 	// Set uuid on project convert 
-	if (Format.id === format.id) {
+	if (Format.id === modelFormat.id) {
 		Project.UUID = guid()
 	}
 
@@ -38,7 +40,7 @@ export function registerModelFormatMod() {
 	// Box UV
 	if (!this.optional_box_uv) Project.box_uv = this.box_uv
 
-	fixPivots()
+	if (!targetV2) fixPivots()
 
 	//Bone Rig
 	/*if (!Format.bone_rig && old_format.bone_rig) {
@@ -144,12 +146,12 @@ export function registerModelFormatMod() {
 	}
 
 	//Rotation Limit
-	if (
+	if (!targetV2 && (
 		(Format.id === modelFormat.id && !old_format.rotation_limit) ||
 		(Format.rotation_limit &&
 			!old_format.rotation_limit &&
 			Format.rotate_cubes)
-	) {
+	)) {
 		Cube.all.forEach((cube) => {
 			if (!cube.rotation.allEqual(0)) {
 				var axis = cube.rotationAxis() ? getAxisNumber(cube.rotationAxis()) : 0;
@@ -165,7 +167,10 @@ export function registerModelFormatMod() {
 	}
 
 
-	// Detect animations names bindings
+	// Detect animation name bindings. V2 imports use ModelEngine's exact configured defaults.
+	if (targetV2) {
+		normalizeModelEngineDefaultStates(Animation.all)
+	} else {
 	const includesMult = (str, arr) => {
 		for(let el of arr) {
 			if(str.includes(el))
@@ -194,6 +199,7 @@ export function registerModelFormatMod() {
 		animNamesFind(anim, "death", ["death", "dying", "die"])
 		animNamesFind(anim, "fly", ["fly", "flying"])
 	})
+	}
 
 
 	//Animation Mode
@@ -205,15 +211,17 @@ export function registerModelFormatMod() {
 	Canvas.updateAllFaces()
 	updateSelection()
 
-	// Hides the conversion dialog
-	hideDialog();
+	// Older Blockbench versions exposed this global; current versions close conversion UI themselves.
+	if (typeof hideDialog === 'function') hideDialog();
 
-	// Saves the new converted file
-	Project.export_path = getProjectSaveFolder() + Project.name + "." + Project.format.codec.extension
-	Project.format.codec.export()
-
-	// Updates the current project view save_path variable to be equal to the just saved one
-	Project.save_path = Project.export_path
+	if (targetV2) {
+		Project.saved = false
+	} else {
+		// Preserve the legacy conversion workflow.
+		Project.export_path = getProjectSaveFolder() + Project.name + "." + Project.format.codec.extension
+		Project.format.codec.export()
+		Project.save_path = Project.export_path
+	}
 
 	// Hacky trick to show the ItemsAdder menu on top
 	let selectedProjTabIndex = 0;

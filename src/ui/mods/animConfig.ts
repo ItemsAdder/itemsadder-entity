@@ -6,6 +6,7 @@ import { CustomError } from '../../util/customError'
 import { isLoopMarker, LOOP_MARKER_COLOR, LOOP_MARKER_NAME } from '../../constants/loopMarkers'
 import events from '../../constants/events'
 import { bus } from '../../util/bus'
+import { animationLayerSettings, isLocomotionAnimation, locomotionStrideSettings, semanticDriverSettings } from '../../animationSettings'
 
 let registered = false
 
@@ -23,6 +24,47 @@ const canPlayerMoveProperty = new Property(Animation, 'string', 'canPlayerMove',
 	default: () => undefined,
 	exposed: true,
 	condition: (val: any) => val !== undefined && val !== ""
+})
+const layerProperty = new Property(Animation, 'string', 'layer', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined && val !== '' && val !== 'base'
+})
+const priorityProperty = new Property(Animation, 'number', 'priority', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined && val !== 0
+})
+const blendInProperty = new Property(Animation, 'number', 'blendIn', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined && val !== 0
+})
+const blendOutProperty = new Property(Animation, 'number', 'blendOut', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined && val !== 0
+})
+const strideDistanceProperty = new Property(Animation, 'number', 'strideDistance', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined
+})
+const locomotionModeProperty = new Property(Animation, 'string', 'locomotionMode', {
+	default: () => undefined, exposed: true, condition: (val: any) => val !== undefined
+})
+const restOnStopProperty = new Property(Animation, 'string', 'restOnStop', {
+	default: () => undefined, exposed: true, condition: (val: any) => val !== undefined
+})
+const semanticDriverProperty = new Property(Animation, 'string', 'semanticDriver', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined && val !== '' && val !== 'none'
+})
+const semanticPeriodProperty = new Property(Animation, 'number', 'semanticPeriod', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined
 })
 
 const refreshAnimIcons = () => {
@@ -74,9 +116,11 @@ const handleClick_canPlayerMove = (animation, val) => {
 }
 
 let isInternalModel_ = () => isInternalModel(settings)
+const isExternalV2 = () => isCustomFormat() && settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)
 
 const animationTypeTitle = tl('iaentitymodel.menu.animation.animType.title')
 const canPlayerMoveTitle = tl('Can Player Move')
+const layerSettingsTitle = 'V2 Animation Settings…'
 // @ts-ignore Remove entries left behind by versions that did not clean up on unload.
 const animationMenu = Animation.prototype.menu.structure
 for (let index = animationMenu.length - 1; index >= 0; index--) {
@@ -84,6 +128,7 @@ for (let index = animationMenu.length - 1; index >= 0; index--) {
 		continue
 	const start = animationMenu[index - 1] === '_' ? index - 1 : index
 	let end = animationMenu[index + 1]?.name === canPlayerMoveTitle ? index + 1 : index
+	if (animationMenu[end + 1]?.name === layerSettingsTitle) end++
 	if (animationMenu[end + 1] === '_') 
 		end++
 	animationMenu.splice(start, end - start + 1)
@@ -101,7 +146,52 @@ const canPlayerMoveMenu = {name: canPlayerMoveTitle, icon: 'movie', children: [
 	{name: tl("True"), icon: animation => (animation.canPlayerMove == 'true' ? 'radio_button_checked' : 'radio_button_unchecked'), click(animation) { handleClick_canPlayerMove(animation, "true") }, condition: isInternalModel_},
 	{name: tl("False"), icon: animation => (animation.canPlayerMove == 'false' ? 'radio_button_checked' : 'radio_button_unchecked'), click(animation) { handleClick_canPlayerMove(animation, "false") }, condition: isInternalModel_},
 ]}
-const animationMenuEntries = [new MenuSeparator(), animationTypeMenu, canPlayerMoveMenu, new MenuSeparator()]
+const layerSettingsMenu = {
+	name: layerSettingsTitle,
+	icon: 'layers',
+	condition: isExternalV2,
+	click(animation: any) {
+		new Dialog({
+			id: 'iaentitymodel_v2_layer_settings',
+			title: layerSettingsTitle,
+			form: {
+				layer: { label: 'Layer', type: 'text', value: animation.layer || 'base' },
+				priority: { label: 'Priority', type: 'number', value: animation.priority ?? 0, min: -1000000, max: 1000000, step: 1 },
+				blendIn: { label: 'Blend In (seconds)', type: 'number', value: animation.blendIn ?? 0, min: 0, max: 60, step: 0.05 },
+				blendOut: { label: 'Blend Out (seconds)', type: 'number', value: animation.blendOut ?? 0, min: 0, max: 60, step: 0.05 },
+				strideDistance: { label: 'Stride distance (blocks per cycle)', type: 'number', value: animation.strideDistance ?? 0, min: 0, step: 0.01 },
+				semanticDriver: { label: 'Semantic driver', type: 'select', value: animation.semanticDriver || 'none', options: {
+					none: 'None', age: 'Entity age', aggressive: 'Aggressive state', attack_progress: 'Attack progress',
+				} },
+				semanticPeriod: { label: 'Semantic period (age ticks)', type: 'number', value: animation.semanticPeriod ?? 0, min: 0, max: 1000000, step: 0.001 },
+			},
+			onConfirm(result: any) {
+				let values
+				const semanticPeriod = result.semanticDriver === 'age' ? Number(result.semanticPeriod) || undefined : undefined
+				try {
+					values = animationLayerSettings({ layer: String(result.layer || 'base'), priority: Number(result.priority), blendIn: Number(result.blendIn), blendOut: Number(result.blendOut) })
+					if (isLocomotionAnimation(animation)) locomotionStrideSettings({ ...animation, strideDistance: Number(result.strideDistance) })
+					semanticDriverSettings({ ...animation, layer: values.layer, semanticDriver: result.semanticDriver, semanticPeriod })
+				} catch (error: any) {
+					Blockbench.showQuickMessage(error.message, 4000)
+					return
+				}
+				Undo.initEdit({ animations: [animation] })
+				animation.layer = values.layer === 'base' ? undefined : values.layer
+				animation.priority = values.priority || undefined
+				animation.blendIn = values.blendIn || undefined
+				animation.blendOut = values.blendOut || undefined
+				animation.strideDistance = isLocomotionAnimation(animation) ? Number(result.strideDistance) : undefined
+				animation.semanticDriver = result.semanticDriver === 'none' ? undefined : result.semanticDriver
+				animation.semanticPeriod = semanticPeriod
+				Project.saved = false
+				Undo.finishEdit('Edit V2 layer settings')
+				this.hide()
+			}
+		}).show()
+	}
+}
+const animationMenuEntries = [new MenuSeparator(), animationTypeMenu, canPlayerMoveMenu, layerSettingsMenu, new MenuSeparator()]
 animationMenu.splice(12, 0, ...animationMenuEntries)
 
 
@@ -233,6 +323,15 @@ bus.on(events.LIFECYCLE.CLEANUP, () => {
 	Blockbench.removeListener('select_project', handleSelectProject)
 	animTypeProperty.delete()
 	canPlayerMoveProperty.delete()
+	layerProperty.delete()
+	priorityProperty.delete()
+	blendInProperty.delete()
+	blendOutProperty.delete()
+	strideDistanceProperty.delete()
+	locomotionModeProperty.delete()
+	restOnStopProperty.delete()
+	semanticDriverProperty.delete()
+	semanticPeriodProperty.delete()
 	if (previousLoopMarkerColor === undefined) 
 		delete markerColors[-1]
 	else 

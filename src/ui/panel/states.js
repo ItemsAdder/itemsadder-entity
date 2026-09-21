@@ -18,27 +18,40 @@ bus.on(events.LIFECYCLE.UNLOAD, () => {
 	style.remove()
 })
 
-// Variants panel
-/*Interface.Panels.aj_states = new Panel({
-	id: 'states',
+// Variants panel: native V2 owns runtime variant selection.
+const variantsPanel = new Panel({
+	id: 'aj_states',
+	name: intl.tl('iaentitymodel.panels.variants.title'),
 	icon: 'movie',
-	condition: { modes: ['edit'], formats: [format.id] },
-	toolbars: {
-		head: Toolbars.texturelist,
-	},
-	component: {
-		name: 'panel-aj-variant',
-		template: `<div id="java-animator-states"></div>`,
-	},
-})*/
+	condition: () => Format.id === format.id && globalThis.IAENTITY?.settings.iaentitymodel.entityFormat === 'v2',
+})
+const variantsMount = document.createElement('div')
+variantsMount.id = 'java-animator-states'
+variantsPanel.node.append(variantsMount)
 bus.on(events.LIFECYCLE.CLEANUP, () => {
 	Interface.Panels?.aj_states?.delete()
 	delete Interface.Panels.aj_states
 })
 
-function updateDisplay(state) {
-	Texture.all.forEach((tex) => tex.updateMaterial())
+export function applyVariantPreview(name) {
+	const states = store.get('states') || {}
+	const state = name === 'default' ? {} : states[name] || {}
+	updateDisplay(state)
+}
+let previewedTextures = []
+export function updateDisplay(state) {
+	new Set([...previewedTextures, ...Object.keys(state)]).forEach((uuid) => {
+		const texture = Texture.all.find((candidate) => candidate.uuid === uuid)
+		const material = Project.materials?.[uuid] || texture?.getMaterial?.()
+		if (texture && material?.map) {
+			material.name = texture.name
+			material.map.name = texture.name
+			material.map.image.src = texture.source
+			material.map.needsUpdate = true
+		}
+	})
 	const changes = Object.keys(state)
+	previewedTextures = changes
 	for (let i = 0; i < changes.length; i++) {
 		const to = state[changes[i]]
 		const from = changes[i]
@@ -46,11 +59,12 @@ function updateDisplay(state) {
 			name: 'transparent',
 			source: transparent,
 		}
-		if (Project.materials[from] && tex) {
-			Project.materials[from].name = tex.name
-			Project.materials[from].map.name = tex.name
-			Project.materials[from].map.image.src = tex.source
-			Project.materials[from].map.needsUpdate = true
+		const material = Project.materials?.[from] || Texture.all.find((texture) => texture.uuid === from)?.getMaterial?.()
+		if (material?.map && tex) {
+			material.name = tex.name
+			material.map.name = tex.name
+			material.map.image.src = tex.source
+			material.map.needsUpdate = true
 		}
 	}
 }
@@ -138,6 +152,7 @@ function Dialog({ children, onRequestHide }) {
 }
 function StatePanel() {
 	const [editState, setEditState] = useState({})
+	const mounted = useRef(false)
 	const [height, setHeight] = useState(0)
 	const [dialogVisible, setDialogVisible] = useState(false)
 	const List = useRef()
@@ -155,9 +170,14 @@ function StatePanel() {
 		}
 	}, [List])
 	useEffect(() => {
+		if (!mounted.current) {
+			mounted.current = true
+			return
+		}
 		console.groupCollapsed('States Update')
 
 		store.set('states', states)
+		bus.dispatch('variant_states_changed', {})
 		console.log('States', states)
 
 		console.groupEnd('States Update')
@@ -170,13 +190,14 @@ function StatePanel() {
 		}
 	}, [selectedIndex, states])
 	useEffect(() => {
-		bus.on(events.LIFECYCLE.LOAD_MODEL, () =>
+		const unloadModel = bus.on(events.LIFECYCLE.LOAD_MODEL, () =>
 			setStates(store.get('states'))
 		)
-		bus.on('states_ui_update', () => {
+		const unloadUpdate = bus.on('states_ui_update', () => {
 			setStates(store.get('states'))
 			updateStateViewOnChange()
 		})
+		return () => { unloadModel(); unloadUpdate() }
 	}, [])
 
 	return (
@@ -269,12 +290,7 @@ function StatePanel() {
 															value: 'transparent',
 															label: 'transparent',
 														},
-														...Texture.all
-															.sort(
-																(a, b) =>
-																	a === t1
-															)
-															.map((t2, i) => ({
+														...Texture.all.map((t2, i) => ({
 																id: i + 2,
 																name: t2.uuid,
 																value: t2.uuid,
@@ -319,21 +335,12 @@ function StatePanel() {
 															})),
 													]}
 													onChange={(v) => {
-														if (
-															t1.uuid ===
-																v.value ||
-															v.value ===
-																'Default'
-														) {
-															delete editState[
-																t1.uuid
-															]
-														} else {
-															editState[t1.uuid] =
-																v.value
-														}
-														updateDisplay(editState)
-														console.log(editState)
+														const nextState = { ...editState }
+														if (t1.uuid === v.value || v.value === 'Default') delete nextState[t1.uuid]
+														else nextState[t1.uuid] = v.value
+														setEditState(nextState)
+														setStates({ ...states, [overlayVisible]: nextState })
+														updateDisplay(nextState)
 													}}
 												/>
 											</li>
@@ -398,9 +405,10 @@ function StatePanel() {
 												<label title="StateName">
 													<input
 														type="text"
+														disabled={state === 'default'}
 														defaultValue={state}
 														onBlur={(e) => {
-															if (
+															if (state !== 'default' &&
 																e.target
 																	.value ===
 																state
@@ -410,9 +418,9 @@ function StatePanel() {
 																e.target.value
 																	.length >
 																	0 &&
-																!/[^a-z0-9\._]/.test(
+																/^[a-z0-9_-]{1,64}$/.test(
 																	e.target
-																		.value
+																	.value
 																) &&
 																!states[
 																	e.target
@@ -483,8 +491,7 @@ function StatePanel() {
 														edit
 													</i>
 												</div>
-												{Object.keys(states).length >
-													1 && (
+												{state !== 'default' && (
 													<div
 														className="in_list_button"
 														onClick={() => {
@@ -510,23 +517,10 @@ function StatePanel() {
 		</div>
 	)
 }
-function find(query) {
-	return new Promise((resolve) => {
-		const id = setInterval(() => {
-			let el
-			if ((el = document.querySelector(query))) {
-				clearInterval(id)
-				resolve(el)
-			}
-		}, 50)
-	})
-}
-find('#java-animator-states').then((el) => {
-	el.previousElementSibling.children[0].innerHTML = intl.tl(
-		'iaentitymodel.panels.variants.title'
-	)
-	ReactDom.render(<StatePanel></StatePanel>, el)
-	bus.on(events.LIFECYCLE.CLEANUP, () => el.remove())
+ReactDom.render(<StatePanel></StatePanel>, variantsMount)
+bus.on(events.LIFECYCLE.CLEANUP, () => {
+	ReactDom.unmountComponentAtNode(variantsMount)
+	variantsMount.remove()
 })
 
 // blockbench does not notify you when a texture is removed so we need to notify ourselves
