@@ -101,12 +101,6 @@ export function getTexturePath(texture: any) {
 		const meta = texture.frameCount > 1 ? texture.getMCMetaContent?.() : undefined
 		const embedded = addV2EmbeddedTexture(bytes, meta)
 		if (embedded) {
-			const projectTextureFolder = getTexturesExportFolder(settings)
-			const folder = path.resolve(projectTextureFolder, '..', '..', 'ia_v2')
-			fs.mkdirSync(folder, { recursive: true })
-			const file = path.join(folder, `${embedded.digest}.png`)
-			if (!fs.existsSync(file) || !fs.readFileSync(file).equals(bytes)) fs.writeFileSync(file, bytes)
-			if (meta) fs.writeFileSync(`${file}.mcmeta`, JSON.stringify(meta, null, 2))
 			return `${settings.iaentitymodel.namespace}:ia_v2/${embedded.digest}`
 		}
 	}

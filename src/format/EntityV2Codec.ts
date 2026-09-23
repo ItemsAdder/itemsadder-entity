@@ -59,11 +59,11 @@ export function decodeEntityV2(input: Uint8Array): EntityV2Document {
 function validate(document: EntityV2Document): void {
 	if (!isObject(document.metadata) || !Array.isArray(document.matrices) || document.matrices.length % 12 || document.matrices.some(value => !Number.isFinite(value) || !Number.isFinite(Math.fround(value))))
 		throw invalid("invalid matrix table")
-	keys(document.metadata, ["schema", "matrixCount", "bones", "animations"], ["legacy", "hitbox", "extensions", "variants", "geometryProfiles", "transformSpace", "textures", "textureMeta"], "metadata")
+	keys(document.metadata, ["schema", "matrixCount", "bones", "animations"], ["legacy", "hitbox", "extensions", "variants", "geometryProfiles", "geometryModels", "transformSpace", "textures", "textureMeta", "entity"], "metadata")
 	if (document.metadata.schema !== "iae2" || integer(document.metadata.matrixCount, "matrixCount") !== document.matrices.length / 12)
 		throw invalid("invalid schema or matrix count")
 	if ("legacy" in document.metadata) {
-		if ("variants" in document.metadata || "geometryProfiles" in document.metadata || "transformSpace" in document.metadata || "textures" in document.metadata || "textureMeta" in document.metadata) throw invalid("legacy mode cannot contain native fields")
+		if ("variants" in document.metadata || "geometryProfiles" in document.metadata || "geometryModels" in document.metadata || "transformSpace" in document.metadata || "textures" in document.metadata || "textureMeta" in document.metadata || "entity" in document.metadata) throw invalid("legacy mode cannot contain native fields")
 		validateLegacyContainer(object(document.metadata.legacy, "legacy"), document)
 		return
 	}
@@ -76,6 +76,7 @@ function validate(document: EntityV2Document): void {
 	const variants = "variants" in document.metadata ? array(document.metadata.variants, "variants", 256).map(value => boundedString(value, "variant", false)) : []
 	if (variants.some(name => name === "default" || !/^[a-z0-9_-]{1,64}$/.test(name)) || new Set(variants).size !== variants.length) throw invalid("invalid variants")
 	if (variants.some((name, index) => index > 0 && variants[index - 1] >= name)) throw invalid("variants must be sorted")
+	if ("entity" in document.metadata) validateEntity(object(document.metadata.entity, "entity"))
 	const bones = array(document.metadata.bones, "bones", MAX_BONES)
 	const names = new Set<string>()
 	const boneOrder: string[] = []
@@ -110,12 +111,126 @@ function validate(document: EntityV2Document): void {
 	}
 	if (visited !== names.size) throw invalid("bone hierarchy cycle")
 	if ("geometryProfiles" in document.metadata) validateGeometryProfiles(object(document.metadata.geometryProfiles, "geometryProfiles"), bones, document)
+	if ("geometryModels" in document.metadata) {
+		if (!("geometryProfiles" in document.metadata)) throw invalid("geometry models require geometry profiles")
+		validateGeometryModels(object(document.metadata.geometryModels, "geometryModels"), object(document.metadata.geometryProfiles, "geometryProfiles"), bones, variants)
+	}
 	const animationNames = new Set<string>()
 	for (const animation of array(document.metadata.animations, "animations", MAX_ANIMATIONS)) {
-		const animationObject = object(animation, "animation")
+	const animationObject = object(animation, "animation")
 		if (animationNames.has(string(animationObject.name, "animation.name"))) throw invalid("duplicate animation name")
 		animationNames.add(string(animationObject.name, "animation.name"))
 		validateAnimation(animationObject, names, boneOrder, document.matrices.length / 12, variants, localTransforms)
+	}
+	const extensions = "extensions" in document.metadata ? object(document.metadata.extensions, "extensions") : {}
+	if ("itemsadder:flight_blend" in extensions) validateFlightBlend(object(extensions["itemsadder:flight_blend"], "flight blend"), animationNames)
+	if ("itemsadder:procedural_motion" in extensions) validateProceduralMotion(object(extensions["itemsadder:procedural_motion"], "procedural motion"), names)
+}
+
+function validateEntity(value: Record<string, unknown>): void {
+	keys(value, ["namespace", "id", "type", "canSunBurn"], [], "entity")
+	for (const field of ["namespace", "id"]) {
+		const part = boundedString(value[field], `entity.${field}`, false)
+		if (!/^[a-z0-9._-]+$/.test(part) || part === "." || part === "..") throw invalid(`unsafe entity ${field}`)
+	}
+	if (!/^[A-Z0-9_]+$/.test(boundedString(value.type, "entity.type", false))) throw invalid("invalid entity type")
+	if (typeof value.canSunBurn !== "boolean") throw invalid("entity.canSunBurn must be boolean")
+}
+
+function validateGeometryModels(models: Record<string, unknown>, profiles: Record<string, unknown>, bones: unknown[], variants: string[]): void {
+	keys(models, [...GEOMETRY_PROFILES], [], "geometryModels")
+	const visualBones = bones.map(value => object(value, "bone"))
+		.filter(bone => bone.boneType === "normal" || bone.boneType === "head")
+		.map(bone => string(bone.name, "bone.name"))
+	for (const profileName of GEOMETRY_PROFILES) {
+		const profileModels = object(models[profileName], "geometry model profile")
+		keys(profileModels, visualBones, [], "geometry model bones")
+		const profileMatrices = object(profiles[profileName], "geometry profile")
+		for (const bone of visualBones) {
+			const fragments = array(profileModels[bone], "geometry model fragments", 256)
+			if (fragments.length !== array(profileMatrices[bone], "geometry fragments", 256).length) throw invalid("geometry model fragment count mismatch")
+			for (const value of fragments) {
+				const fragment = object(value, "geometry model fragment")
+				keys(fragment, ["model", "variants"], [], "geometry model fragment")
+				object(fragment.model, "geometry model")
+				const overrides = object(fragment.variants, "geometry model variants")
+				for (const [name, override] of Object.entries(overrides)) {
+					if (!variants.includes(name)) throw invalid("geometry model references an unknown variant")
+					const value = object(override, "geometry model variant")
+					keys(value, ["textures"], [], "geometry model variant")
+					object(value.textures, "geometry model variant textures")
+				}
+			}
+		}
+	}
+}
+
+function validateFlightBlend(value: Record<string, unknown>, animations: Set<string>): void {
+	keys(value, ["straight"], ["left", "right", "deadzone", "maxTurnRate", "smoothing"], "flight blend")
+	for (const field of ["straight", "left", "right"]) if (field in value && !animations.has(boundedString(value[field], `flight blend ${field}`, false)))
+		throw invalid(`flight blend references an unknown ${field} animation`)
+	const deadzone = "deadzone" in value ? number(value.deadzone, "flight blend deadzone") : 0.5
+	const maxTurnRate = "maxTurnRate" in value ? number(value.maxTurnRate, "flight blend maxTurnRate") : 8
+	const smoothing = "smoothing" in value ? number(value.smoothing, "flight blend smoothing") : 0.35
+	if (deadzone < 0 || maxTurnRate <= deadzone || smoothing <= 0 || smoothing > 1) throw invalid("invalid flight blend tuning")
+}
+
+function validateProceduralMotion(value: Record<string, unknown>, bones: Set<string>): void {
+	keys(value, ["preset", "historyTicks"], ["phaseSource", "root", "body", "head", "neck", "tail", "bodyFrame"], "procedural motion")
+	if (!["dragon", "vanilla_ender_dragon", "custom"].includes(boundedString(value.preset, "procedural motion preset", false))) throw invalid("unknown procedural motion preset")
+	if ("phaseSource" in value && !["elapsed", "native"].includes(boundedString(value.phaseSource, "procedural motion phaseSource", false))) throw invalid("unknown procedural motion phaseSource")
+	const historyTicks = integer(value.historyTicks, "procedural motion historyTicks")
+	if (historyTicks < 2 || historyTicks > 64) throw invalid("procedural motion historyTicks must be between 2 and 64")
+	const configured = new Set<string>()
+	const bone = (name: unknown, label: string) => {
+		const value = boundedString(name, `${label} bone`, false)
+		if (!bones.has(value)) throw invalid(`${label} contains a missing bone`)
+		if (configured.has(value)) throw invalid("procedural motion contains the same bone twice")
+		configured.add(value)
+	}
+	const delay = (input: unknown, label: string) => {
+		const value = number(input, label)
+		if (value < 0 || value > historyTicks - 1) throw invalid(`${label} exceeds the history span`)
+	}
+	const tuning = (component: Record<string, unknown>, label: string, chain: boolean) => {
+		for (const field of ["yawInfluence", "verticalInfluence", "rollInfluence"]) if (Math.abs(number(component[field], `${label} ${field}`)) > 128) throw invalid(`${label} ${field} is out of range`)
+		const follow = number(component.follow, `${label} follow`), response = number(component.response, `${label} response`)
+		if (follow < 0 || follow > 2 || response <= 0 || response > 1) throw invalid(`invalid ${label} follow/response`)
+		if (chain) {
+			const amplitude = number(component.waveAmplitude, `${label} waveAmplitude`), frequency = number(component.waveFrequency, `${label} waveFrequency`)
+			if (amplitude < 0 || amplitude > 45 || frequency < 0 || frequency > Math.PI) throw invalid(`invalid ${label} wave`)
+		}
+	}
+	for (const label of ["root", "body", "head"]) if (label in value) {
+		const component = object(value[label], label)
+		keys(component, ["bone", "sampleDelay", "referenceDelay", "yawInfluence", "verticalInfluence", "rollInfluence", "follow", "response"], ["verticalSampleDelay", "verticalReferenceDelay", "rollReferenceStartDelay", "rollReferenceEndDelay", "rollReferenceBlend"], label)
+		bone(component.bone, label); delay(component.sampleDelay, `${label} sampleDelay`); delay(component.referenceDelay, `${label} referenceDelay`); tuning(component, label, false)
+		if ("verticalSampleDelay" in component) delay(component.verticalSampleDelay, `${label} verticalSampleDelay`)
+		if ("verticalReferenceDelay" in component) delay(component.verticalReferenceDelay, `${label} verticalReferenceDelay`)
+		if ("rollReferenceStartDelay" in component) delay(component.rollReferenceStartDelay, `${label} rollReferenceStartDelay`)
+		if ("rollReferenceEndDelay" in component) delay(component.rollReferenceEndDelay, `${label} rollReferenceEndDelay`)
+		if ("rollReferenceBlend" in component && Math.abs(number(component.rollReferenceBlend, `${label} rollReferenceBlend`)) > 2) throw invalid(`${label} rollReferenceBlend is out of range`)
+	}
+	for (const label of ["neck", "tail"]) if (label in value) {
+		const component = object(value[label], label)
+		keys(component, ["bones", "startDelay", "endDelay", "referenceDelay", "yawInfluence", "verticalInfluence", "rollInfluence", "follow", "response", "waveAmplitude", "waveFrequency"], ["rollReferenceStartDelay", "rollReferenceEndDelay", "rollReferenceBlend"], label)
+		array(component.bones, `${label} bones`, 64).forEach(value => bone(value, label))
+		delay(component.startDelay, `${label} startDelay`); delay(component.endDelay, `${label} endDelay`); delay(component.referenceDelay, `${label} referenceDelay`); tuning(component, label, true)
+		if ("rollReferenceStartDelay" in component) delay(component.rollReferenceStartDelay, `${label} rollReferenceStartDelay`)
+		if ("rollReferenceEndDelay" in component) delay(component.rollReferenceEndDelay, `${label} rollReferenceEndDelay`)
+		if ("rollReferenceBlend" in component && Math.abs(number(component.rollReferenceBlend, `${label} rollReferenceBlend`)) > 2) throw invalid(`${label} rollReferenceBlend is out of range`)
+	}
+	if ("bodyFrame" in value) {
+		if (!("body" in value)) throw invalid("bodyFrame requires body motion")
+		const frame = object(value.bodyFrame, "bodyFrame")
+		keys(frame, ["anchor", "targets", "pivot"], [], "bodyFrame")
+		if (!bones.has(boundedString(frame.anchor, "bodyFrame anchor", false))) throw invalid("bodyFrame anchor is missing")
+		const targets = array(frame.targets, "bodyFrame targets", 64).map(target => boundedString(target, "bodyFrame target", false))
+		if (!targets.length || targets.some(target => !bones.has(target)) || new Set(targets).size !== targets.length)
+			throw invalid("bodyFrame contains a missing or duplicate target")
+		const pivot = array(frame.pivot, "bodyFrame pivot", 3)
+		if (pivot.length !== 3 || pivot.some(coordinate => Math.abs(number(coordinate, "bodyFrame pivot")) > 1024))
+			throw invalid("invalid bodyFrame pivot")
 	}
 }
 
@@ -187,15 +302,17 @@ function validateLegacyContainer(legacy: Record<string, unknown>, document: Enti
 }
 
 function validateAnimation(animation: Record<string, unknown>, names: Set<string>, boneOrder: string[], matrixCount: number, variants: string[], localTransforms: boolean): void {
-	keys(animation, ["name", "length", "loopMode", "animType", "canPlayerMove", "effects", "tracks"], ["loopStartTime", "loopEndTime", "affectedBones", "channelMasks", "layer", "priority", "blendIn", "blendOut", "strideDistance", "locomotionMode", "restOnStop", "semanticDriver", "semanticPeriod"], "animation")
+	keys(animation, ["name", "length", "loopMode", "animType", "canPlayerMove", "effects", "tracks"], ["loopStartTime", "loopEndTime", "sampleRate", "affectedBones", "channelMasks", "layer", "priority", "blendIn", "blendOut", "strideDistance", "locomotionMode", "restOnStop", "semanticDriver", "semanticPeriod"], "animation")
 	const name = string(animation.name, "animation.name")
 	const length = number(animation.length, "animation.length")
+	const sampleRate = "sampleRate" in animation ? integer(animation.sampleRate, "animation.sampleRate") : 20
+	if (sampleRate < 1 || sampleRate > 1000) throw invalid("animation.sampleRate must be from 1 to 1000")
 	const loopMode = string(animation.loopMode, "animation.loopMode")
 	const hasStart = "loopStartTime" in animation, hasEnd = "loopEndTime" in animation
 	if (length < 0 || hasStart !== hasEnd) throw invalid("invalid animation loop range")
 	if (hasStart) {
 		const start = number(animation.loopStartTime, "animation.loopStartTime"), end = number(animation.loopEndTime, "animation.loopEndTime")
-		const boundary = (time: number) => Math.ceil(time * 20 - 1e-9)
+		const boundary = (time: number) => Math.ceil(time * sampleRate - 1e-9)
 		if (start < 0 || end < start || end > length || (loopMode === "loop" && (start >= end || boundary(start) >= boundary(end)))) throw invalid("invalid animation loop range")
 	}
 	const animType = string(animation.animType, "animation.animType")
@@ -240,7 +357,7 @@ function validateAnimation(animation: Record<string, unknown>, names: Set<string
 			}
 		}
 	} else if ("affectedBones" in animation || "channelMasks" in animation) throw invalid("world animation cannot declare influence masks")
-	const frameCount = expectedFrames(length)
+	const frameCount = expectedFrames(length, sampleRate)
 	validateEffects(object(animation.effects, "effects"), frameCount, variants, names)
 	Object.entries(tracks).forEach(([bone, frames]) => {
 		if (!names.has(bone)) throw invalid("track has unknown bone")
@@ -285,7 +402,7 @@ function validatePropertyTracks(channel: Record<string, unknown>, frameCount: nu
 	}
 }
 
-function expectedFrames(length: number): number { if (length > (MAX_TRACK_FRAMES - 1) / 20) throw invalid("animation length too large"); return Math.ceil(length * 20) + 1 }
+function expectedFrames(length: number, sampleRate: number): number { if (length > (MAX_TRACK_FRAMES - 1) / sampleRate) throw invalid("animation length too large"); return Math.ceil(length * sampleRate) + 1 }
 
 export function canonicalJson(value: unknown): string {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value)

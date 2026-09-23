@@ -1,0 +1,37 @@
+{
+  "minecraftVersion": "1.21.1",
+  "officialClientSha256": "499f6897d1837516680f3114072d8106e11c9adcd933fe5cf051b551089b0c99",
+  "yarnMappings": "1.21.1+build.3",
+  "yarnMappedClientSha256": "99e7df448a3d8fb8be9d128a41136f60855a87b5106b488487b152af92b60c9b",
+  "rendererClassSha256": "17a595fbe83c9e8560eacf8e108bc4ef4ea46c1fdf65fcea77aedf3d5c80bdbb",
+  "modelClassSha256": "960e22c01d06e77400bfee27293626be47ad2f449ca68e9a25fe8d1fa4f217ef",
+  "originalTextureSha256": "a7d5bc7b373bfee01a5ec721914fd9f584dde5f7977303c63e857c48f99c42bf",
+  "redTextureSha256": "014486373f8763d2f091edc875694858353f88e9f20fb332286cf5e08410dc31",
+  "geometry": {
+    "cubes": 65,
+    "bones": 37,
+    "textureSize": [
+      256,
+      256
+    ]
+  },
+  "animation": "Three editable 1-second authored flight cycles derived from Minecraft 1.21.1 EnderDragonModel wing/limb motion and steady-turn history curvature",
+  "coordinateConversion": "Minecraft model (x,y,z) -> Blockbench (-x,24.016-y,z), then root Y=180 exactly matches the vanilla renderer conversion",
+  "flightBlend": {
+    "straight": "fly",
+    "left": "fly_turn_left",
+    "right": "fly_turn_right",
+    "normalizedTurn": [
+      -1,
+      1
+    ]
+  },
+  "modelId": "ender_dragon_hybrid_v2",
+  "entityId": "ia_v2_dragon:ender_dragon_hybrid_v2",
+  "motionStrategy": [
+    "itemsadder:flight_blend",
+    "itemsadder:procedural_motion"
+  ],
+  "baseProject": "ender_dragon_v2",
+  "hybridChannelDivision": "root/wing/limb authored turn; body/head/neck/tail neutral authored turn plus procedural history"
+}

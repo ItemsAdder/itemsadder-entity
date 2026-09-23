@@ -207,6 +207,8 @@ const codec = new Codec('iaentitymodel', {
 		for (var key in ModelProject.properties) {
 			ModelProject.properties[key].copy(Project, model)
 		}
+		if (Project.flightBlend) model.flight_blend = cloneObject(Project.flightBlend)
+		if (Project.proceduralMotion) model.procedural_motion = cloneObject(Project.proceduralMotion)
 
 		if (Project.overrides) {
 			model.overrides = Project.overrides
@@ -278,6 +280,9 @@ const codec = new Codec('iaentitymodel', {
 			Animator.animations.forEach((a) => {
 				model.animations.push(a.getUndoCopy({ bone_names: true }, true))
 			})
+		}
+		if (AnimationController.all.length) {
+			model.animation_controllers = AnimationController.all.map((controller) => controller.getUndoCopy())
 		}
 
 		if (Format.display_mode && Object.keys(display).length >= 1) {
@@ -383,6 +388,8 @@ const codec = new Codec('iaentitymodel', {
 		for (var key in ModelProject.properties) {
 			ModelProject.properties[key].merge(Project, model)
 		}
+		Project.flightBlend = model.flight_blend ? cloneObject(model.flight_blend) : undefined
+		Project.proceduralMotion = model.procedural_motion ? cloneObject(model.procedural_motion) : undefined
 
 		if (model.overrides) {
 			Project.overrides = model.overrides
@@ -453,6 +460,9 @@ const codec = new Codec('iaentitymodel', {
 				}
 			})
 		}
+		if (model.animation_controllers) {
+			model.animation_controllers.forEach((data) => new AnimationController(data).add(false))
+		}
 		if (model.display !== undefined) {
 			DisplayMode.loadJSON(model.display)
 		}
@@ -488,6 +498,7 @@ const format = new ModelFormat({
 	show_on_start_screen: true,
 	bone_rig: true,
 	animation_mode: true,
+	animation_controllers: true,
 	canvas_limit: false,
 	rotate_cubes: true,
 	rotation_limit: false,

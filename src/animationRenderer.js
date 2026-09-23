@@ -327,6 +327,9 @@ async function renderAnimation(options) {
 			// Sampling uses explicit times; never change the user's editor snapping.
 
 			const nativeDisplay = settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings)
+			const sampleRate = nativeDisplay ? (animation.ia_v2_sample_rate ?? 20) : 20
+			if (!Number.isInteger(sampleRate) || sampleRate < 1 || sampleRate > 1000)
+				throw new Error('V2 animation sample rate must be an integer from 1 to 1000')
 			const textureVariantNames = nativeDisplay ? textureVariants(store.get('states')) : []
 			const value = nativeDisplay ? null : Cache.hit(animation)
 			if (!value) {
@@ -340,10 +343,10 @@ async function renderAnimation(options) {
 
 				if (!Number.isFinite(animation.length) || animation.length < 0 || animation.length > 3600)
 					throw new Error('Animation length must be finite and at most one hour')
-				const sampleCount = nativeDisplay ? Math.ceil(animation.length * 20) : Math.round(animLength * 20)
+				const sampleCount = nativeDisplay ? Math.ceil(animation.length * sampleRate) : Math.round(animLength * 20)
 				for (let sample = 0; sample <= sampleCount; sample++) {
-					const i = Math.min(sample / 20, animation.length)
-					accAnimationLength += 0.05
+					const i = Math.min(sample / sampleRate, animation.length)
+					accAnimationLength += 1 / sampleRate
 					await Async.wait_if_overflow()
 					setAnimatorTime(i)
 					const effects = {
@@ -352,7 +355,7 @@ async function renderAnimation(options) {
 						texture_variant: nativeDisplay ? sampleTextureVariant(animation.animators.effects?.keyframes || [], i, textureVariantNames) : 'default'
 					}
 					if (animation.animators.effects) {
-						const time = Math.round(i * 20) / 20
+						const time = Math.round(i * sampleRate) / sampleRate
 						animation.animators.effects.keyframes
 							.filter((keyframe) => keyframe.time === time)
 							.forEach((keyframe) => {

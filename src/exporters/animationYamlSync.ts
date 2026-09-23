@@ -9,6 +9,7 @@ type AnimationYamlSyncOptions = {
 	internalModel: boolean
 	animations: aj.Animations
 	staticAnimationUuid: string
+	entityFormat: string
 }
 
 export function syncAnimationExportYaml(options: AnimationYamlSyncOptions) {
@@ -22,6 +23,7 @@ export function syncAnimationExportYaml(options: AnimationYamlSyncOptions) {
 		)
 		return
 	}
+	if (options.entityFormat === 'v2') return
 
 	ensureCustomEntityYaml(
 		options.projectFolder,

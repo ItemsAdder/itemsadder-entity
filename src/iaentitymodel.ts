@@ -145,6 +145,7 @@ export interface SettingDescriptor {
 
 export interface Settings {
 	projectName: string
+	entityType: string
 	exporter: string
 	useCache: boolean
 	cacheMode: 'memory' | 'disk'

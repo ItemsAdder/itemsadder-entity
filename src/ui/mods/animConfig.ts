@@ -66,6 +66,11 @@ const semanticPeriodProperty = new Property(Animation, 'number', 'semanticPeriod
 	exposed: true,
 	condition: (val: any) => val !== undefined
 })
+const sampleRateProperty = new Property(Animation, 'number', 'ia_v2_sample_rate', {
+	default: () => undefined,
+	exposed: true,
+	condition: (val: any) => val !== undefined && val !== 20
+})
 
 const refreshAnimIcons = () => {
 	// @ts-ignore
@@ -332,6 +337,7 @@ bus.on(events.LIFECYCLE.CLEANUP, () => {
 	restOnStopProperty.delete()
 	semanticDriverProperty.delete()
 	semanticPeriodProperty.delete()
+	sampleRateProperty.delete()
 	if (previousLoopMarkerColor === undefined) 
 		delete markerColors[-1]
 	else 

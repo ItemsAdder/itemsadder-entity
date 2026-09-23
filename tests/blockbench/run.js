@@ -191,12 +191,19 @@ async function main() {
 			const output = path.join(profileRoot, 'v2-artist-output')
 			const namespace = process.env.IA_V2_NAMESPACE || 'test'
 			const artists = [
-				['goofy_goblin', process.env.IA_V2_GOBLIN_SOURCE || path.join(root, 'projects/native-v2/goofy_goblin/source/goofy_goblin.bbmodel')],
-				['armored_grub', process.env.IA_V2_GRUB_SOURCE || path.join(root, 'projects/native-v2/armored_grub/source/armored_grub.bbmodel')],
+				['goofy_goblin', process.env.IA_V2_GOBLIN_SOURCE || path.join(root, 'projects/native-v2/goofy_goblin/source/goofy_goblin.bbmodel'), {}],
+				['armored_grub', process.env.IA_V2_GRUB_SOURCE || path.join(root, 'projects/native-v2/armored_grub/source/armored_grub.bbmodel'), {}],
+				['ender_dragon_v2', process.env.IA_V2_DRAGON_SOURCE || path.join(root, 'projects/native-v2/ender_dragon_v2/source/ender_dragon_v2.bbmodel'), { entityType: 'ENDER_DRAGON', flightBlend: true, proceduralMotion: true }],
 			].filter(([id]) => !process.env.IA_V2_ARTIST_IDS || process.env.IA_V2_ARTIST_IDS.split(',').includes(id))
 			const results = []
-			for (const [id, sourcePath] of artists) results.push(await runArtist(page, { sourcePath, id, namespace, outputRoot: path.join(output, id) }))
+			for (const [id, sourcePath, options] of artists) results.push(await runArtist(page, { sourcePath, id, namespace, outputRoot: path.join(output, id), ...options }))
 			console.log(JSON.stringify({ status: 'PASS', test: 'v2-artist-exports', output, results }))
+		}
+		if (process.env.BLOCKBENCH_TEST_V2_PROCEDURAL_FIXTURES === '1') {
+			const output = path.join(profileRoot, 'v2-procedural-fixtures')
+			const sourcePath = process.env.IA_V2_DRAGON_SOURCE || path.join(root, 'projects/native-v2/ender_dragon_v2/source/ender_dragon_v2.bbmodel')
+			const results = await require('./v2-procedural-fixtures').run(page, { sourcePath, outputRoot: output })
+			console.log(JSON.stringify({ status: 'PASS', test: 'v2-procedural-fixtures', output, results }))
 		}
 			if (process.env.BLOCKBENCH_TEST_V2_PIG === '1') {
 			const output = path.join(profileRoot, 'v2-pig-output')

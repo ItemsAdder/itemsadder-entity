@@ -142,7 +142,7 @@ async function computeAnimationData(
 		? createV2GeometryProfiles(models, cubeData, variantTextureOverrides)
 		: undefined
 
-	if(needsToExportJsonsModels(settings)) {
+	if(needsToExportJsonsModels(settings) && !(settings.iaentitymodel.entityFormat === 'v2' && !isInternalModel(settings))) {
 		await exportRigModels(models, variants.variantModels, scaleModels, geometryProfiles)
 		if (settings.iaentitymodel.transparentTexturePath) {
 			await exportTransparentTexture()

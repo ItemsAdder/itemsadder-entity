@@ -3,6 +3,7 @@ import crypto from "crypto"
 import fs from "fs"
 import path from "path"
 import { decodeEntityV2, encodeEntityV2 } from "./EntityV2Codec"
+import { compileProceduralMotion, defaultProceduralMotion, ProceduralMotionSimulation, solveChainPivots } from "../proceduralMotion"
 
 const golden = JSON.parse(fs.readFileSync(path.resolve(__dirname, "fixtures/iae2-v2.json"), "utf8"))
 const encoded = encodeEntityV2(golden)
@@ -15,6 +16,19 @@ Object.assign(markerLoop.metadata.animations[0], { loopMode: 'loop', loopStartTi
 assert.doesNotThrow(() => encodeEntityV2(markerLoop))
 Object.assign(markerLoop.metadata.animations[0], { loopStartTime: .001, loopEndTime: .049 })
 assert.throws(() => encodeEntityV2(markerLoop))
+const highRate = JSON.parse(JSON.stringify(golden))
+const highRateAnimation = highRate.metadata.animations[0]
+highRateAnimation.sampleRate = 400
+highRateAnimation.tracks.root = Array(21).fill(0)
+highRateAnimation.effects.sounds.keyframes = Array.from({ length: 21 }, () => [])
+highRateAnimation.effects.particles.keyframes = Array.from({ length: 21 }, () => [])
+assert.equal(decodeEntityV2(encodeEntityV2(highRate)).metadata.animations[0].sampleRate, 400)
+highRateAnimation.tracks.root.pop()
+assert.throws(() => encodeEntityV2(highRate))
+for (const sampleRate of [0, 1.5, 1001, Infinity]) {
+	const invalidRate = JSON.parse(JSON.stringify(golden)); invalidRate.metadata.animations[0].sampleRate = sampleRate
+	assert.throws(() => encodeEntityV2(invalidRate))
+}
 assert.throws(() => decodeEntityV2(encoded.subarray(0, -1)))
 const malformedUtf8 = encoded.slice(); malformedUtf8[16] = 0xC3
 assert.throws(() => decodeEntityV2(malformedUtf8))
@@ -60,6 +74,107 @@ const numericJsonLength = new DataView(numericEncoded.buffer, numericEncoded.byt
 const numericJson = new TextDecoder().decode(numericEncoded.subarray(16, 16 + numericJsonLength))
 assert.ok(numericJson.includes('"numbers":{"large":1000000000000000000000,"one":1,"tiny":0.0000001,"zero":0}'))
 
+const flight = JSON.parse(JSON.stringify(golden))
+flight.metadata.animations.push({ ...JSON.parse(JSON.stringify(flight.metadata.animations[0])), name: 'fly_turn_left' })
+flight.metadata.animations.push({ ...JSON.parse(JSON.stringify(flight.metadata.animations[0])), name: 'fly_turn_right' })
+flight.metadata.extensions = { 'itemsadder:flight_blend': {
+	straight: flight.metadata.animations[0].name, left: 'fly_turn_left', right: 'fly_turn_right',
+	deadzone: 0.5, maxTurnRate: 8, smoothing: 0.35,
+} }
+assert.deepEqual(decodeEntityV2(encodeEntityV2(flight)).metadata.extensions, flight.metadata.extensions)
+const straightOnly = JSON.parse(JSON.stringify(flight)); delete straightOnly.metadata.extensions['itemsadder:flight_blend'].left; delete straightOnly.metadata.extensions['itemsadder:flight_blend'].right
+assert.doesNotThrow(() => encodeEntityV2(straightOnly))
+const badFlight = (change: (definition: any) => void) => {
+	const value = JSON.parse(JSON.stringify(flight)); change(value.metadata.extensions['itemsadder:flight_blend']); assert.throws(() => encodeEntityV2(value))
+}
+badFlight(value => { value.left = 'missing' })
+badFlight(value => { value.maxTurnRate = value.deadzone })
+badFlight(value => { value.smoothing = 0 })
+
+const procedural = JSON.parse(JSON.stringify(golden))
+procedural.metadata.extensions = { 'itemsadder:procedural_motion': {
+	preset: 'vanilla_ender_dragon', historyTicks: 40,
+	body: { bone: 'root', sampleDelay: 5, referenceDelay: 10, yawInfluence: 0, verticalInfluence: 0,
+		rollInfluence: -1.5, follow: 1, response: 0.7 },
+	neck: { bones: [], startDelay: 5, endDelay: 1, referenceDelay: 6, yawInfluence: 1.5,
+		verticalInfluence: 7.5, rollInfluence: 1.5, follow: 1, response: 0.7, waveAmplitude: 0, waveFrequency: 0 },
+} }
+assert.deepEqual(decodeEntityV2(encodeEntityV2(procedural)).metadata.extensions, procedural.metadata.extensions)
+const badProcedural = (change: (definition: any) => void) => {
+	const value = JSON.parse(JSON.stringify(procedural)); change(value.metadata.extensions['itemsadder:procedural_motion']); assert.throws(() => encodeEntityV2(value))
+}
+badProcedural(value => { value.body.bone = 'missing' })
+badProcedural(value => { value.historyTicks = 65 })
+badProcedural(value => { value.body.sampleDelay = 40 })
+badProcedural(value => { value.body.response = 0 })
+badProcedural(value => { value.tail = { ...value.neck, bones: ['root', 'root'] } })
+
+const groups = Array.from({ length: 21 }, (_, index) => ({ uuid: `bone-${index}`, name: index ? `appendage_${index}` : 'core' }))
+const projectMotion = { ...defaultProceduralMotion(), preset: 'custom' as const, body: groups[0].uuid, head: groups[1].uuid,
+	tail: groups.slice(2).map(group => group.uuid), tailFollow: 1, tailFlexibility: 0, vertical: 1, wave: 0 }
+const runtimeMotion = compileProceduralMotion(projectMotion, groups)!
+const preview = new ProceduralMotionSimulation(runtimeMotion)
+assert.equal(preview.telemetry().length, 21)
+assert.equal(preview.telemetry()[1].delay, 2)
+assert.equal(preview.telemetry()[preview.telemetry().length - 2].delay, 28)
+let yaw = 0
+preview.advance(yaw, 0)
+for (let tick = 0; tick < 28; tick++) { yaw -= 8; preview.advance(yaw, tick * 0.1) }
+for (let tick = 0; tick < 2; tick++) { yaw += 8; preview.advance(yaw, 2.8 + tick * 0.1) }
+const reversal = preview.telemetry()
+assert.ok(reversal[reversal.length - 1].rotation[1] > 0, 'head must respond to the new right turn')
+assert.ok(reversal[1].rotation[1] < 0, 'tail base must be transitioning through the new turn')
+assert.ok(reversal[reversal.length - 2].rotation[1] > 0, 'tail tip must still contain older left-turn history')
+assert.notEqual(reversal[reversal.length - 2].rotation[0], 0, 'vertical history must affect chain pitch')
+
+const geometryBones = ['unequal_0', 'unequal_1', 'unequal_2', 'unequal_3']
+const flatRest = [[0, 0, 0], [1, 0, 0], [3, 0, 0], [3, 0, 4]]
+const nestedSegments = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [0, 0, 4]]
+const nestedRest = nestedSegments.map((_, index) => nestedSegments.slice(0, index + 1)
+	.reduce((sum, value) => sum.map((entry, axis) => entry + value[axis]), [0, 0, 0]))
+assert.deepEqual(nestedRest, flatRest)
+const geometryTelemetry = geometryBones.map((bone, index) => ({ bone, delay: index,
+	rotation: [index * 2, 12 - index * 7, index * 3] }))
+const flatShape = solveChainPivots(geometryBones, geometryTelemetry, flatRest)
+const nestedShape = solveChainPivots(geometryBones, geometryTelemetry, nestedRest)
+assert.deepEqual(nestedShape, flatShape)
+for (const [index, length] of [1, 2, 4].entries())
+	assert.ok(Math.abs(Math.hypot(...flatShape[index + 1].map((value, axis) => value - flatShape[index][axis])) - length) < 1e-9)
+assert.ok(Math.hypot(...flatShape[3].map((value, axis) => value - flatRest[3][axis])) > .25,
+	'flat procedural chains must move downstream pivots, not only rotate fixed joints')
+
+const vanillaOracle = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../ItemsAdder/.tasks/custom-entities-v2/golden/vanilla-ender-dragon-1.21.1.json'), 'utf8'))
+const vanillaGroups = Array.from({ length: 19 }, (_, index) => ({ uuid: `vanilla-${index}`, name: `vanilla_${index}` }))
+const vanillaMotion = compileProceduralMotion({ ...defaultProceduralMotion(), preset: 'vanilla_ender_dragon',
+	body: vanillaGroups[0].uuid, head: vanillaGroups[1].uuid,
+	neck: vanillaGroups.slice(2, 7).map(group => group.uuid), tail: vanillaGroups.slice(7).map(group => group.uuid) }, vanillaGroups)!
+const exact = vanillaOracle.exactPreset
+assert.equal(vanillaMotion.historyTicks, exact.historyTicks)
+for (const key of ['sampleDelay', 'referenceDelay', 'yawInfluence', 'verticalInfluence', 'rollInfluence'])
+	assert.equal((vanillaMotion.body as any)[key], exact.body[key])
+for (const key of ['sampleDelay', 'referenceDelay', 'yawInfluence', 'verticalInfluence', 'rollInfluence'])
+	assert.equal((vanillaMotion.head as any)[key], exact.head[key])
+for (const chain of ['neck', 'tail'] as const) {
+	assert.equal(vanillaMotion[chain]!.bones.length, exact[chain].count)
+	for (const key of ['startDelay', 'endDelay', 'referenceDelay', 'yawInfluence', 'verticalInfluence', 'rollInfluence'])
+		assert.equal((vanillaMotion[chain] as any)[key], exact[chain][key])
+}
+
+const sharedOracle = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../ItemsAdder/.tasks/custom-entities-v2/golden/procedural-motion-v1.json'), 'utf8'))
+const sharedConfig = sharedOracle.config
+const sharedPreview = new ProceduralMotionSimulation({
+	preset: 'custom', historyTicks: sharedConfig.historyTicks,
+	body: { bone: 'core', ...sharedConfig.body }, head: { bone: 'sensor', ...sharedConfig.head },
+	tail: { bones: Array.from({ length: sharedConfig.tail.count }, (_, index) => `segment_${index}`), ...sharedConfig.tail },
+})
+for (const [yawSample, ySample] of sharedOracle.samples) sharedPreview.advance(yawSample, ySample)
+const sharedResult = sharedPreview.telemetry()
+const close = (actual: number[], expected: number[]) => actual.every((value, index) => Math.abs(value - expected[index]) <= sharedOracle.tolerance)
+assert.equal(sharedResult.length, sharedOracle.expected.entryCount)
+assert.ok(close(sharedResult[1].rotation, sharedOracle.expected.tailBaseRotation))
+assert.ok(close(sharedResult[sharedConfig.tail.count].rotation, sharedOracle.expected.tailTipRotation))
+assert.ok(close(sharedResult[sharedResult.length - 1].rotation, sharedOracle.expected.headRotation))
+
 const legacy = { metadata: { schema: "iae2", matrixCount: 0, bones: [], animations: [], legacy: { coordinateMode: "armorstand-head-1.21.1", source: {} } }, matrices: [] }
 assert.deepEqual(decodeEntityV2(encodeEntityV2(legacy)), legacy)
 assert.throws(() => encodeEntityV2({ ...legacy, matrices: new Array(12).fill(0) }))
@@ -95,6 +210,16 @@ geometry.metadata.geometryProfiles = {
 	unrestricted: { root: [0] },
 }
 assert.deepEqual(decodeEntityV2(encodeEntityV2(geometry)).metadata.geometryProfiles, geometry.metadata.geometryProfiles)
+const bundle = JSON.parse(JSON.stringify(geometry))
+bundle.metadata.entity = { namespace: 'custom', id: 'dragon', type: 'ENDER_DRAGON', canSunBurn: false }
+bundle.metadata.geometryModels = Object.fromEntries(['compatible', 'single_axis_45', 'unrestricted'].map(profile => [profile, {
+	root: [{ model: { textures: {}, elements: [] }, variants: {} }],
+}]))
+assert.deepEqual(decodeEntityV2(encodeEntityV2(bundle)).metadata.entity, bundle.metadata.entity)
+const badBundle = JSON.parse(JSON.stringify(bundle)); badBundle.metadata.geometryModels.compatible.root = []
+assert.throws(() => encodeEntityV2(badBundle))
+const badBundleType = JSON.parse(JSON.stringify(bundle)); badBundleType.metadata.entity.type = 'ender dragon'
+assert.throws(() => encodeEntityV2(badBundleType))
 const badProfile = JSON.parse(JSON.stringify(geometry)); badProfile.metadata.geometryProfiles.future = { root: [0] }
 assert.throws(() => encodeEntityV2(badProfile))
 const missingBone = JSON.parse(JSON.stringify(geometry)); delete missingBone.metadata.geometryProfiles.compatible.root

@@ -126,6 +126,20 @@ export const DefaultSettings = {
 			options: { legacy: 'Legacy (armor stands)', v2: 'V2 (item displays)' },
 			isVisible() { return !isPlayerModel(settings) },
 		},
+		entityType: {
+			title: 'Base entity type',
+			description: 'Bukkit entity type stored inside the V2 entity file.',
+			type: 'text',
+			default: 'ZOMBIE',
+			onUpdate(d) {
+				d.setValue(String(d.value || '').toUpperCase())
+				d.isValid = /^[A-Z0-9_]+$/.test(d.value)
+				if (!d.isValid) d.error = 'Use a Bukkit entity type such as ZOMBIE or ENDER_DRAGON.'
+				return d
+			},
+			isVisible() { return !isPlayerModel(settings) && settings.iaentitymodel.entityFormat === 'v2' },
+			dependencies: ['iaentitymodel.entityFormat'],
+		},
 		modelScalingMode: {
 			get title() {
 				return tl('iaentitymodel.settings.modelScalingMode.title')

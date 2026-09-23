@@ -8,9 +8,11 @@ import { authoredChannelMasks } from './v2LocalTransforms'
 import { sampleBoneEffectTracks } from '../boneEffects'
 import { locomotionStrideSettings, nonDefaultAnimationLayerSettings, semanticDriverSettings } from '../animationSettings'
 import { v2EmbeddedTextureMeta, v2EmbeddedTextures } from '../format/v2EmbeddedTextures'
+import { compileProceduralMotion } from '../proceduralMotion'
 
 declare const Group: any
 declare const Animation: any
+declare const Project: any
 
 /** Convert evaluated editor matrices into a deterministic indexed pose table. */
 export function createV2AnimationFile(data: any): { animationFile: Buffer } {
@@ -57,6 +59,8 @@ export function createV2AnimationFile(data: any): { animationFile: Buffer } {
 		const propertyTracks = sampleBoneEffectTracks(original?.animators?.effects?.keyframes || [], entry.length, bones.map((bone: any) => bone.name))
 		return {
 			name: entry.name, length: entry.length, loopMode: entry.loopMode, animType: entry.animType || 'other',
+			...(original?.ia_v2_sample_rate !== undefined && original.ia_v2_sample_rate !== 20
+				? { sampleRate: original.ia_v2_sample_rate } : {}),
 			canPlayerMove: entry.canPlayerMove === true || entry.canPlayerMove === 'true', tracks,
 			channelMasks: authoredChannelMasks(original, groups),
 			...nonDefaultAnimationLayerSettings(original),
@@ -90,12 +94,50 @@ export function createV2AnimationFile(data: any): { animationFile: Buffer } {
 	})) : undefined
 	const textures = v2EmbeddedTextures()
 	const textureMeta = v2EmbeddedTextureMeta()
+	const flight = Project.flightBlend
+	const animationName = (uuid: string, label: string) => {
+		if (!uuid) return undefined
+		const animation = Animation.all.find((entry: any) => entry.uuid === uuid)
+		if (!animation) throw new Error(`Flight Blend ${label} animation no longer exists`)
+		return animation.name
+	}
+	const flightBlend = flight?.straight ? {
+		straight: animationName(flight.straight, 'straight'),
+		...(flight.left ? { left: animationName(flight.left, 'left') } : {}),
+		...(flight.right ? { right: animationName(flight.right, 'right') } : {}),
+		deadzone: Number(flight.deadzone ?? 0.5), maxTurnRate: Number(flight.maxTurnRate ?? 8),
+		smoothing: Number(flight.smoothing ?? 0.35),
+	} : undefined
+	if (flightBlend?.left && flightBlend.right) {
+		for (const animation of animations) {
+			if (animation.name === flightBlend.straight) animation.animType = 'fly'
+			else if (animation.name === flightBlend.left || animation.name === flightBlend.right) animation.animType = 'other'
+		}
+	}
+	const proceduralMotion = compileProceduralMotion(Project.proceduralMotion, Group.all)
+	const entitySettings: any = data.settings.iaentitymodel
+	const extensions = {
+		...(flightBlend ? { 'itemsadder:flight_blend': flightBlend } : {}),
+		...(proceduralMotion ? { 'itemsadder:procedural_motion': proceduralMotion } : {}),
+	}
 	const metadata = {
 		schema: 'iae2', transformSpace: 'local', matrixCount: matrices.length / 12, bones, animations,
+		entity: {
+			namespace: entitySettings.namespace,
+			id: entitySettings.projectName,
+			type: entitySettings.entityType || 'ZOMBIE',
+			canSunBurn: false,
+		},
 		...(Object.keys(textures).length ? { textures } : {}),
 		...(Object.keys(textureMeta).length ? { textureMeta } : {}),
 		...(variants.length ? { variants } : {}),
 		...(geometryProfiles ? { geometryProfiles } : {}),
+		...(data.geometryProfiles ? { geometryModels: Object.fromEntries(GEOMETRY_PROFILE_NAMES.map(profileName => [profileName,
+			Object.fromEntries(Object.entries(data.geometryProfiles[profileName] as Record<string, any[]>).map(([bone, fragments]) => [bone,
+				fragments.map((fragment: any) => ({ model: fragment.model, variants: fragment.variants }))
+			]))
+		])) } : {}),
+		...(Object.keys(extensions).length ? { extensions } : {}),
 	}
 	return { animationFile: Buffer.from(encodeEntityV2({ metadata, matrices })) }
 }

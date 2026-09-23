@@ -48,6 +48,7 @@ async function animationExport(data: any) {
 		internalModel: isInternalModel(settings),
 		animations: data.animations as aj.Animations,
 		staticAnimationUuid,
+		entityFormat: settings.iaentitymodel.entityFormat,
 	})
 
 	Blockbench.showQuickMessage(tl('iaentitymodel.popups.successfullyExported'))
